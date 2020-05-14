@@ -1,14 +1,28 @@
 #include "psystem.h"
 #include "physics.h"
+#include "random.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <math.h>
+#include <mpi.h>
 
 double ps_G = 1.0;
 double ps_dt = 0.001;
 double ps_framerate = 10;
+
+typedef struct block
+{
+	int row, col;
+	int row_update_rank;
+	int col_update_rank;
+} Block;
+
+static const int SCHEDULER_RANK = 0;
+
+static int rank, N_procs;
+static Block *blocks;
 
 static Particle *particles; 
 static size_t N_particles;
@@ -28,38 +42,17 @@ void ps_init(size_t p_count)
 	for (int i = 0; i < N_particles; i++)
 		particles[i] = DEFAULT_PARTICLE; 
 
-	srand(time(0));
+	rand_init();
+
+	MPI_Init(NULL, NULL);
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &N_procs);
 }
 
 void ps_destroy()
 {
+	MPI_Finalize();
 	free(particles);
-}
-
-double randf()
-{
-	return (double)rand() / (double)RAND_MAX;
-}
-
-double randf_rng(double min, double max)
-{
-	return min + (max - min) * randf();
-}
-
-void rnd_sphere(double radius, double *p)
-{
-	double r = radius * sqrt(randf()); 
-
-	double theta = randf() * PI_2;
-	double phi = randf() * PI_2;
-	double cos_theta = cos(theta);
-	double sin_theta = sin(theta);
-	double cos_phi = cos(phi);
-	double sin_phi = sin(phi); 
-
-	p[0] = r * cos_theta * sin_phi;
-	p[1] = r * sin_theta * cos_phi; 
-	p[2] = r * cos_phi; 
 }
 
 void ps_randomize(double radius, double max_speed, double mass_min, double mass_max)
@@ -69,9 +62,9 @@ void ps_randomize(double radius, double max_speed, double mass_min, double mass_
 
 	for (int i = 0; i < N_particles; i++)
 	{
-		(particles + i)->m = randf_rng(mass_min, mass_max);
- 		rnd_sphere(radius, particles[i].p);
-		rnd_sphere(max_speed, particles[i].v);
+		(particles + i)->m = rand_frng(mass_min, mass_max);
+ 		rand_sphere(radius, particles[i].p);
+		rand_sphere(max_speed, particles[i].v);
 	}
 }
 

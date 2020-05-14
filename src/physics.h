@@ -3,9 +3,6 @@
 #include <stdio.h>
 #include <math.h>
 
-const double PI = 3.14159265359;
-const double PI_2 = 6.283185307;
-
 typedef struct particle 
 {
 	double m;
