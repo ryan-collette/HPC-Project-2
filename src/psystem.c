@@ -5,11 +5,17 @@
 #include <time.h>
 #include <math.h>
 
-static double G = 1.0;
-static double dt = 0.0001;
+double ps_G = 1.0;
+double ps_dt = 0.0001;
+int ps_framestride = 10;
 
 static Particle *particles; 
 static size_t N_particles;
+
+size_t get_N_particles()
+{
+	return N_particles;
+}
 
 void ps_init(size_t p_count)
 {
@@ -22,8 +28,6 @@ void ps_init(size_t p_count)
 		particles[i] = DEFAULT_PARTICLE; 
 
 	srand(time(0));
-
-		
 }
 
 void ps_destroy()
@@ -68,14 +72,11 @@ void ps_randomize(double radius, double max_speed, double mass_min, double mass_
  		rnd_sphere(radius, particles[i].p);
 		rnd_sphere(max_speed, particles[i].v);
 	}
-
-	write_particles(particles, N_particles, "test.csv");
-	read_particles(particles, N_particles, "test.csv");
 }
 
 static void ps_step()
 {
-	double h = dt * 0.5;
+	double h = ps_dt * 0.5;
 	double f[3];
 
 	for (int i = 0; i < N_particles; i++)
@@ -85,7 +86,7 @@ static void ps_step()
 	for (int i = 0; i < N_particles - 1; i++)
 		for (int j = i+1; j < N_particles; j++)
 		{
-			gforce(particles + i, particles + j, G, f);		
+			gforce(particles + i, particles + j, ps_G, f);		
 			for (int k = 0; k < 3; k++)
 			{
 				particles[i].a[k] += f[k];
@@ -106,7 +107,7 @@ static void ps_step()
 
 void ps_run(double tspan)
 {
-	int n = (int)ceil(tspan / dt);
+	int n = (int)ceil(tspan / ps_dt);
 	char outfile[64]; 
 
 	write_particles(particles, N_particles, "frame0");
@@ -115,9 +116,9 @@ void ps_run(double tspan)
 	{
 		ps_step();
 
-		if (i % 10 == 0)
+		if (i % ps_framestride == 0)
 		{
-			snprintf(outfile, sizeof(outfile), "frame%d", i / 10);
+			snprintf(outfile, sizeof(outfile), "frame%d", i / ps_framestride);
 			write_particles(particles, N_particles, outfile);
 		}
 	}
