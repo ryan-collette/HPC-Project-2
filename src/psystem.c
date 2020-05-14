@@ -91,7 +91,7 @@ void ps_testcase()
 	particles[1] = p2;	
 }
 
-static void ps_step()
+static inline void ps_step()
 {
 	double h = ps_dt * 0.5;
 	double f[3];
@@ -126,15 +126,23 @@ void ps_run(double tspan)
 {
 	char outfile[128]; 
 	int n = (int)ceil(tspan / ps_dt);
-	int frame_stride = (int)ceil(1.0 / (ps_dt * ps_framerate));
+	int frame_stride = ps_framerate > 0 ? (int)ceil(1.0 / (ps_dt * ps_framerate)) : -1;
+	int prog_stride = n / 100;
 
-	write_particles(particles, N_particles, "frame0");
+	if (frame_stride > 0)
+		write_particles(particles, N_particles, "frame0");
 
 	for (int i = 1; i <= n; i++)
 	{
 		ps_step();
 
-		if (i % frame_stride == 0)
+		if (i % prog_stride == 0)
+		{
+			double pct_prog = (double)i / n;
+			printf("Progress: %.0f%%\n", pct_prog * 100);
+		}
+
+		if (frame_stride > 0 && i % frame_stride == 0)
 		{
 			snprintf(outfile, sizeof(outfile), "frame%d", i / frame_stride);
 			write_particles(particles, N_particles, outfile);
