@@ -1,13 +1,14 @@
 #include "psystem.h"
 #include "physics.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <math.h>
 
 double ps_G = 1.0;
-double ps_dt = 0.0001;
-int ps_framestride = 10;
+double ps_dt = 0.001;
+double ps_framerate = 10;
 
 static Particle *particles; 
 static size_t N_particles;
@@ -74,6 +75,22 @@ void ps_randomize(double radius, double max_speed, double mass_min, double mass_
 	}
 }
 
+void ps_testcase()
+{
+	N_particles = 2;	
+
+	Particle p1 = DEFAULT_PARTICLE;
+	p1.p[0] = 1.0;
+	p1.v[1] = 1.0;
+
+	Particle p2 = DEFAULT_PARTICLE;
+	p2.p[0] = -1.0;
+	p2.v[1] = -1.0;
+
+	particles[0] = p1;
+	particles[1] = p2;	
+}
+
 static void ps_step()
 {
 	double h = ps_dt * 0.5;
@@ -89,8 +106,8 @@ static void ps_step()
 			gforce(particles + i, particles + j, ps_G, f);		
 			for (int k = 0; k < 3; k++)
 			{
-				particles[i].a[k] += f[k];
-				particles[j].a[k] -= f[k];
+				particles[i].a[k] += f[k] * particles[j].m;
+				particles[j].a[k] -= f[k] * particles[i].m;
 			}	
 		}
 
@@ -107,8 +124,9 @@ static void ps_step()
 
 void ps_run(double tspan)
 {
+	char outfile[128]; 
 	int n = (int)ceil(tspan / ps_dt);
-	char outfile[64]; 
+	int frame_stride = (int)ceil(1.0 / (ps_dt * ps_framerate));
 
 	write_particles(particles, N_particles, "frame0");
 
@@ -116,9 +134,9 @@ void ps_run(double tspan)
 	{
 		ps_step();
 
-		if (i % ps_framestride == 0)
+		if (i % frame_stride == 0)
 		{
-			snprintf(outfile, sizeof(outfile), "frame%d", i / ps_framestride);
+			snprintf(outfile, sizeof(outfile), "frame%d", i / frame_stride);
 			write_particles(particles, N_particles, outfile);
 		}
 	}

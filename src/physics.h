@@ -14,7 +14,7 @@ typedef struct particle
 	double a[3];
 } Particle; 
 
-const Particle DEFAULT_PARTICLE = { 1, { 0, 0, 0 }, { 0, 0, 0 }};
+const Particle DEFAULT_PARTICLE = { 1, { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 }};
 	 
 
 void gforce(Particle *a, Particle *b, double G, double *f)
@@ -26,7 +26,7 @@ void gforce(Particle *a, Particle *b, double G, double *f)
 	double dy = b->p[1] - a->p[1];
 	double dz = b->p[2] - a->p[2];
 	double rr = dx*dx + dy*dy + dz*dz;
-	double mag = G * a->m * b->m * pow(rr + EPS, -1.5);
+	double mag = G * pow(rr + EPS, -1.5);
 
 	f[0] = dx * mag;	
 	f[1] = dy * mag;

@@ -1,36 +1,41 @@
 #include "psystem.h"
 #include <stdio.h>
+#include <sys/time.h>
+
+static inline double wtime()
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return tv.tv_sec + tv.tv_usec / 1e6;
+}
 
 int main(int argc, char **argv)
 {
-	printf("Starting simulation.\n");
+	printf("Please enter any number of the following arguments:\n");
+	printf("particle count, timespan, G (force constant), step size, framerate\n");
 
-	size_t pcount = 100;	
+	size_t pcount = 2;
 	double tspan = 5.0;
 
-	if (argc > 1)
-		pcount = atoi(argv[1]);
-
-	if (argc > 2)
-		tspan = atof(argv[2]);
-
-	if (argc > 4)
-	{
-		ps_G = atof(argv[3]);
-		ps_dt = atof(argv[4]);
-	}
+	scanf("%ld %lf %lf %lf %lf", &pcount, &tspan, &ps_G, &ps_dt, &ps_framerate);
 
 	ps_init(pcount);
+	ps_testcase();
 
+	printf("\nStarting simulation with\n");
 	printf("particle count = %ld\n", get_N_particles());
-	printf("tspan = %f\n", tspan);
-	printf("G = %f\n", ps_G);
-	printf("dt = %f\n", ps_dt);
+	printf("tspan = %lf\n", tspan);
+	printf("G = %lf\n", ps_G);
+	printf("dt = %lf\n", ps_dt);
+	printf("framerate  = %lf\n", ps_framerate);
 
-	ps_randomize(100, 1.0, 1.0, 1.0);
+	//ps_randomize(100, 1.0, 1.0, 1.0);
+	double t_start = wtime();
 	ps_run(tspan);
+	double t_end = wtime();
 	
-	printf("Ending simulation.\n");
+	printf("\nCompleted in %lf seconds\n", t_end - t_start);
+	printf("\nEnding simulation.\n");
 	ps_destroy();
 	return 0;
 }
