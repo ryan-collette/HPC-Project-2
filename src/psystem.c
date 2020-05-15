@@ -6,36 +6,132 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdbool.h>
 #include <mpi.h>
 
 double ps_G = 1.0;
+double ps_tspan = 1.0;
 double ps_dt = 0.001;
 double ps_framerate = 10;
 
+typedef struct segment
+{
+	int index, start, count;
+	int owner_rank;
+	bool current, held;
+} Segment;
+
 typedef struct block
 {
-	int row, col;
-	int row_update_rank;
-	int col_update_rank;
+	int owner_rank;
+	bool current, held;
 } Block;
+
+typedef enum jobType { NO_JOB, STEP, UPDATE_FORCES } JobType;
 
 static const int SCHEDULER_RANK = 0;
 
 static int rank, N_procs;
+
+static Segment *segments;
+static int N_segments;
+
 static Block *blocks;
+static int N_blocks;
 
 static Particle *particles; 
 static size_t N_particles;
 
-size_t get_N_particles()
+static void init_scheduler()
+{
+	N_segments = N_procs;
+	segments = malloc(N_segments * sizeof(Segment));
+
+	Segment s = { 0, 0, 0, rank, true, false }; 
+	int r = N_particles % N_segments;
+	int count = N_particles / N_segments;
+	for (int i = 0; i < N_segments; i++)
+	{
+		s.index = i;
+
+		if (i < r)
+		{
+			s.count = count + 1;
+			s.start = s.count * i;
+		}
+		else
+			s.count = count;
+			s.start = (count + 1) * r + count * (i - r);
+
+		segments[i] = s;
+	}
+
+	N_blocks = N_segments * N_segments;
+	blocks = malloc(N_blocks * sizeof(Block));
+
+	Block b = { rank, false, false }; 
+	
+	for (int r = 0; r < N_segments; r++)
+		for (int c = 0; c < N_segments; c++)
+			blocks[r * N_segments + c] = b;
+
+	printf("N_procs: %d\n", N_procs);
+
+	printf("Segments:\n");
+	for (int i = 0; i < N_segments; i++)
+		printf("{ %d, %d, %d }\n", segments[i].index, segments[i].start, segments[i].count);
+}
+
+static JobType request_job(Segment *row, Segment *col)
+{
+	for (int r = 0; r < N_segments; r++)
+	{
+		int c = -1;
+		for (int i = r; i < N_segments; i++)
+			if (!blocks[r * N_segments + i].current)
+			{
+				c = i;
+				break;
+			}
+
+		if (c < 0)
+		{
+			if (segments[r].current)
+			{
+				for (int i = 0; i < N_segments; i++)
+				{
+					blocks[r * N_segments + i].current = false;
+					blocks[i * N_segments + r].current = false; 
+				} 
+
+				return NO_JOB;
+			}
+			else
+			{
+				return STEP;
+			}	
+		}
+		else
+		{
+			return UPDATE_FORCES;
+		}
+	}	
+
+	return NO_JOB;
+}
+
+bool ps_is_scheduler()
+{
+	return rank == SCHEDULER_RANK;
+}
+
+size_t ps_N_particles()
 {
 	return N_particles;
 }
 
 void ps_init(size_t p_count)
 {
-	free(particles);
-
 	N_particles = p_count;
 	particles = malloc(N_particles * sizeof(Particle));
 
@@ -47,19 +143,21 @@ void ps_init(size_t p_count)
 	MPI_Init(NULL, NULL);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &N_procs);
+
+	if (rank == SCHEDULER_RANK)
+		init_scheduler();
 }
 
 void ps_destroy()
 {
 	MPI_Finalize();
 	free(particles);
+	free(segments);
+	free(blocks);
 }
 
 void ps_randomize(double radius, double max_speed, double mass_min, double mass_max)
 {
-	if (particles == NULL)
-		return;
-
 	for (int i = 0; i < N_particles; i++)
 	{
 		(particles + i)->m = rand_frng(mass_min, mass_max);
@@ -115,10 +213,10 @@ static inline void ps_step()
 		}
 }
 
-void ps_run(double tspan)
+void ps_run()
 {
 	char outfile[128]; 
-	int n = (int)ceil(tspan / ps_dt);
+	int n = (int)ceil(ps_tspan / ps_dt);
 	int frame_stride = ps_framerate > 0 ? (int)ceil(1.0 / (ps_dt * ps_framerate)) : -1;
 	int prog_stride = n / 100;
 
