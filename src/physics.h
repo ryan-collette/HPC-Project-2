@@ -5,23 +5,20 @@
 
 typedef struct particle 
 {
-	double m;
-	double p[3];
-	double v[3];
-	double a[3];
+	double mass;
+	double pos[3];
 } Particle; 
 
-const Particle DEFAULT_PARTICLE = { 1, { 0, 0, 0 }, { 0, 0, 0 }, { 0, 0, 0 }};
-	 
+const int N_PARTICLE_CMPTS = 4;
 
-void gforce(Particle *a, Particle *b, double G, double *f)
+void gforce(double *pa, double *pb, double G, double *f)
 {
 	//minimum square distance between particles
 	const double EPS = 1e-9;
 
-	double dx = b->p[0] - a->p[0];
-	double dy = b->p[1] - a->p[1];
-	double dz = b->p[2] - a->p[2];
+	double dx = pb[0] - pa[0];
+	double dy = pb[1] - pa[1];
+	double dz = pb[2] - pa[2];
 	double rr = dx*dx + dy*dy + dz*dz;
 	double mag = G * pow(rr + EPS, -1.5);
 
@@ -30,6 +27,7 @@ void gforce(Particle *a, Particle *b, double G, double *f)
 	f[2] = dz * mag;
 }
 
+/*
 void write_particles(Particle *particles, int n, const char *fname)
 {
 	FILE *file = fopen(fname, "w");
@@ -49,3 +47,4 @@ void read_particles(Particle *particles, int n, const char *fname)
 
 	fclose(file);
 }
+*/
