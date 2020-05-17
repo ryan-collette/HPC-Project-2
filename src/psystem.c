@@ -14,11 +14,11 @@ double ps_framerate = 0;
 
 typedef struct job
 {
-	//two regions of particles for force-pair calcultation
-	int row, col;
-
+	int index;
 	MPI_Request request;
 } Job;
+
+static const Job NULL_JOB = { -1, MPI_REQUEST_NULL };
 
 static const int SCHEDULER_RANK = 0;
 static const int BLOCKS_PER_PROC = 1;
@@ -76,6 +76,13 @@ bool ps_is_scheduler()
 	return rank == SCHEDULER_RANK;
 }
 
+//Outputs row and column of index in a N_segs x N_segs grid
+static inline void block_coords(int index, int *row, int *col)
+{
+	*row = index / N_segs;
+	*col = index % N_segs;
+}
+
 void ps_init(size_t p_count)
 {
 	rand_init();
@@ -84,6 +91,7 @@ void ps_init(size_t p_count)
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &N_procs);
 
+	//would definitely not have this quirk in a real piece of software
 	assert(N_procs > 1);
 
 	N_segs = N_procs * BLOCKS_PER_PROC; 
@@ -92,13 +100,15 @@ void ps_init(size_t p_count)
 	parts_per_seg = p_count / N_segs;
 	cmpts_per_seg = parts_per_seg * 3;
 
+	N_particles = p_count;
+	N_vels = N_particles * 3;
+	N_accels = N_particles * 3;
+	N_work_buffer = p_count * 6; 
+	N_particle_block = parts_per_seg * 2;
+	N_accel_block = cmpts_per_seg * 2;
+
 	if (ps_is_scheduler())
 	{
-		N_particles = p_count;
-		N_vels = N_particles * 3;
-		N_accels = N_particles * 3;
-		N_work_buffer = p_count * 6; 
-
 		particles = malloc(N_particles * sizeof(Particle));
 		vels = malloc(N_vels * sizeof(double));
 		accels = malloc(N_accels * sizeof(double));
@@ -107,12 +117,12 @@ void ps_init(size_t p_count)
 		Particle p = { 1, { 0, 0, 0}};
 		for (int i = 0; i < N_particles; i++)
 			particles[i] = p;
+
+		for (int i = 0; i < N_accels; i++)
+			accels[i] = 0.0;
 	}	
 	else
 	{
-		N_particle_block = parts_per_seg * 2;
-		N_accel_block = cmpts_per_seg * 2;
-	
 		particle_block = malloc(N_particle_block * sizeof(Particle));
 		accel_block = malloc(N_accel_block * sizeof(double));	
 	}
@@ -169,22 +179,24 @@ static int merge_jobs(Job *jobs, bool *current)
 
 	for (int i = 1; i < N_procs; i++)
 	{
-		if (jobs[i].row < 0 || jobs[i].col < 0) //job not pending
+		if (jobs[i].index < 0) //job not pending
 			continue;
 
 		int complete = false;
 		MPI_Test(&jobs[i].request, &complete, MPI_STATUS_IGNORE);
-		int r_ind = jobs[i].row * N_segs + jobs[i].col;
-		int c_ind = jobs[i].col * N_segs + jobs[i].row;
 
+		int r, c;
+		block_coords(jobs[i].index, &r, &c);
+		int r_ind = r * N_segs + c;
+		int c_ind = c * N_segs + r;
+
+		//don't merge until both the block and its mirror have been used
 		if (complete && !current[r_ind] && !current[c_ind])
 		{
-			printf("Merging job (%d, %d) from %d\n", jobs[i].row, jobs[i].col, i);
-/*
 			double *row_src = work_buffer + i * N_accel_block;
 			double *col_src = row_src + cmpts_per_seg;
-			double *row_dest = accels + jobs[i].row * cmpts_per_seg;
-			double *col_dest = accels + jobs[i].col * cmpts_per_seg;
+			double *row_dest = accels + r * cmpts_per_seg;
+			double *col_dest = accels + c * cmpts_per_seg;
 
 			for (int j = 0; j < cmpts_per_seg; j++)
 			{
@@ -192,12 +204,10 @@ static int merge_jobs(Job *jobs, bool *current)
 				col_dest[j] += col_src[j];
 			} 
 
-*/
 			current[r_ind] = true;
 			current[c_ind] = true;
 
-			jobs[i].row = -1;
-			jobs[i].col = -1;
+			jobs[i].index = -1;
 		}
 		else
 			count++;
@@ -207,26 +217,29 @@ static int merge_jobs(Job *jobs, bool *current)
 }
 
 //Queues the Job corresonding to job_i if a free worker is available.
-//Returns true if successful, flase otherwise.
+//Returns true if successful, false otherwise.
 static bool try_queue_job(int job_i, Job *jobs, bool *current)
 {
-	int r = job_i / N_segs;
-	int c = job_i % N_segs;
+	int r, c;
+	block_coords(job_i, &r, &c);
 
+	//job is underway if mirror block is already queued
 	for (int i = 1; i < N_procs; i++)
-		if (jobs[i].row == r && jobs[i].col == c ||
-		    jobs[i].col == r && jobs[i].row == c)
-			return true;
+		if (jobs[i].index >= 0)
+		{
+			int r_other, c_other;
+			block_coords(jobs[i].index, &r_other, &c_other);
+			if (r == r_other && c == c_other ||
+		    	c == r_other && r == c_other)
+				return true;
+		}
 
 	int rank = -1;
 
 	//find free worker
-	for (int i = 1; i < N_procs; i++)
-		if (jobs[i].row < 0 || jobs[i].col < 0)
-		{
+	for (int i = 1; i < N_procs && rank < 0; i++)
+		if (jobs[i].index < 0)
 			rank = i;
-			break;
-		}
 
 	if (rank < 0)
 		return false;
@@ -235,30 +248,23 @@ static bool try_queue_job(int job_i, Job *jobs, bool *current)
 	Particle *col = particles + c * parts_per_seg;
 	MPI_Request row_request, col_request, accel_request;
 
-	MPI_Isend(row, 0, MPI_DOUBLE, rank, ROW_TAG, MPI_COMM_WORLD, &row_request);	
+	MPI_Isend(row, parts_per_seg * N_PARTICLE_CMPTS, MPI_DOUBLE,
+	          rank, ROW_TAG, MPI_COMM_WORLD, &row_request);	
 
-	MPI_Isend(col, 0, MPI_DOUBLE, rank, COL_TAG, MPI_COMM_WORLD, &col_request);
+	MPI_Isend(col, parts_per_seg * N_PARTICLE_CMPTS, MPI_DOUBLE,
+	          rank, COL_TAG, MPI_COMM_WORLD, &col_request);
 
-	MPI_Irecv(work_buffer, 0, MPI_DOUBLE, rank, ACCEL_TAG, MPI_COMM_WORLD, &accel_request); 
+	MPI_Irecv(work_buffer + rank * N_accel_block, N_accel_block, MPI_DOUBLE,
+	          rank, ACCEL_TAG, MPI_COMM_WORLD, &accel_request); 
 
-	//MPI_Isend(row, parts_per_seg * N_PARTICLE_CMPTS, MPI_DOUBLE,
-	//          rank, ROW_TAG, MPI_COMM_WORLD, &row_request);	
-
-	//Particle *col = particles + c * parts_per_seg;
-	//MPI_Isend(col, parts_per_seg * N_PARTICLE_CMPTS, MPI_DOUBLE,
-	//          rank, COL_TAG, MPI_COMM_WORLD, &col_request);
-
-	//MPI_Irecv(work_buffer + rank * N_accel_block, N_accel_block, MPI_DOUBLE,
-	//          rank, ACCEL_TAG, MPI_COMM_WORLD, &accel_request); 
-
-	jobs[rank].row = r;
-	jobs[rank].col = c;
+	jobs[rank].index = job_i;
 	jobs[rank].request = accel_request;
-	printf("queuing job: (%d, %d) on %d\n", r, c, rank);
+
 	return true;
 } 
 
-//perform integration step for segment i
+//Perform integration step for segment i if all necessary data is current.
+//Returns true if successful, false otherwise. 
 static bool try_step(int seg_i, bool *current)
 {
 	bool row_current = true;
@@ -267,13 +273,14 @@ static bool try_step(int seg_i, bool *current)
 
 	if (!row_current)
 		return false;
-/*
+
 	double h = 0.5 * ps_dt;
 
-	Particle *seg = particles + index * parts_per_seg;
-	double *seg_vels = vels + index * cmpts_per_seg;	
-	double *seg_accels = accels + index * cmpts_per_seg;	
+	Particle *seg = particles + seg_i * parts_per_seg;
+	double *seg_vels = vels + seg_i * cmpts_per_seg;	
+	double *seg_accels = accels + seg_i * cmpts_per_seg;	
 
+	//leapfrog / Varlet integration step
 	for (int i = 0 ; i < parts_per_seg; i++)
 	for (int k = 0; k < 3; k++)
 	{
@@ -283,7 +290,10 @@ static bool try_step(int seg_i, bool *current)
 		seg[i].pos[k] += h * vhalf;
 		seg_vels[i*3 + k] = vhalf + h * a;	
 	}	
-*/
+
+	//clear acceleration data
+	for (int i = 0; i < cmpts_per_seg; i++)
+		seg_accels[i] = 0.0;
 
 	//row of blocks can now be computed for the next step
 	for (int i = 0; i < N_segs; i++)
@@ -292,15 +302,25 @@ static bool try_step(int seg_i, bool *current)
 	return true;
 }
 
+static inline void print_frame()
+{
+	static char outfile[64];
+	static int frame = 0;
+
+	snprintf(outfile, sizeof(outfile), "frame%d", frame);
+	write_particles(particles, N_particles, outfile);
+	frame++;	
+}
+
 static void run_scheduler()
 {
+	//current job for each processor
 	Job *jobs = malloc(N_procs * sizeof(Job)); 
-	Job null_job = { .row = -1, .col = -1, .request = MPI_REQUEST_NULL };
 	for (int i = 0; i < N_procs; i++)
-		jobs[i] = null_job;
+		jobs[i] = NULL_JOB;
 
 	int N_current = N_segs * N_segs;
-	//which blocks have completed for the current step?
+	//indicates which blocks are up to date with the current integration step
 	bool *current = malloc(N_current * sizeof(bool));
 	for (int i = 0; i < N_current; i++)
 		current[i] = false;
@@ -309,9 +329,15 @@ static void run_scheduler()
 	int frame_stride = ps_framerate > 0 ?
 		(int)ceil(1.0 / (ps_dt * ps_framerate)) : -1;
 
+	//current segment
 	int seg_i = 0;
+
+	//current job
 	int job_i = 0;
-	int job_count = N_current * step_count;	
+	int max_job_i = N_current;
+
+	if (frame_stride > 0)
+		print_frame();
 
 	while(step_count > 0)
 	{
@@ -320,30 +346,26 @@ static void run_scheduler()
 		if (try_step(seg_i, current))
 		{
 			seg_i++;
+
+			if (step_count > 1)
+				max_job_i += N_segs;
+
 			if (seg_i == N_segs)
 			{
 				seg_i = 0;
 				step_count--;
+				
+				if (step_count % 10 == 0)
+					printf("Steps remaining: %d\n", step_count);
+
+				if (frame_stride > 0 && step_count % frame_stride == 0)
+					print_frame();
 			}	
 		}
 
-		while (job_count > 0 &&
-			  (current[job_i] || try_queue_job(job_i, jobs, current)))
-		{
-			job_i = (job_i + 1) % N_current;
-			job_count--;
-		}
-
-		double x = 0;
-		for (int i = 0; i < 1000000; i++)
-			x *= i;
-
-		for (int r = 0; r < N_segs; r++)
-		{
-			for (int c = 0; c < N_segs; c++)
-				printf("%d ", current[r * N_segs + c]);	
-			printf("\n");
-		}	
+		while (job_i < max_job_i && 
+			  (current[job_i % N_current] || try_queue_job(job_i % N_current, jobs, current)))
+			job_i++;
 	}
 
 	int dummy[0];
@@ -354,10 +376,10 @@ static void run_scheduler()
 	free(jobs);
 }
 
+//Computes the acceleration fo paticles in segments row and col due to eachother.
 static void compute_block(Particle *row, Particle *col,
                           double *row_accels, double *col_accels)
 {
-	/*
 	double f[3];
 	
 	for (int i = 0; i < N_accel_block; i++)
@@ -379,7 +401,6 @@ static void compute_block(Particle *row, Particle *col,
 			}
 		}
 	} 
-	*/
 }
 
 static void tick_worker(MPI_Request *stop_request, int *terminate)
@@ -392,13 +413,10 @@ static void tick_worker(MPI_Request *stop_request, int *terminate)
 	MPI_Request row_request, col_request;
 	int row_ready = false, col_ready = false;
 
-	MPI_Irecv(row, 0, MPI_DOUBLE, SCHEDULER_RANK, ROW_TAG, MPI_COMM_WORLD, &row_request);	
-	MPI_Irecv(col, 0, MPI_DOUBLE, SCHEDULER_RANK, COL_TAG, MPI_COMM_WORLD, &col_request);
-
-//	MPI_Irecv(row, parts_per_seg * N_PARTICLE_CMPTS, MPI_DOUBLE,
-//	          SCHEDULER_RANK, ROW_TAG, MPI_COMM_WORLD, &row_request);	
-//	MPI_Irecv(col, parts_per_seg * N_PARTICLE_CMPTS, MPI_DOUBLE,
- //	          SCHEDULER_RANK, COL_TAG, MPI_COMM_WORLD, &col_request);
+	MPI_Irecv(row, parts_per_seg * N_PARTICLE_CMPTS, MPI_DOUBLE,
+	          SCHEDULER_RANK, ROW_TAG, MPI_COMM_WORLD, &row_request);	
+	MPI_Irecv(col, parts_per_seg * N_PARTICLE_CMPTS, MPI_DOUBLE,
+ 	          SCHEDULER_RANK, COL_TAG, MPI_COMM_WORLD, &col_request);
 
 	while(!row_ready || !col_ready)
 	{
@@ -412,10 +430,8 @@ static void tick_worker(MPI_Request *stop_request, int *terminate)
 
 	compute_block(row, col, row_accels, col_accels);
 
-	MPI_Send(accel_block, 0, MPI_DOUBLE, SCHEDULER_RANK, ACCEL_TAG, MPI_COMM_WORLD);
-
-	//MPI_Send(accel_block,_accel_block, MPI_DOUBLE,
-	//         SCHEDULER_RANK, ACCEL_TAG, MPI_COMM_WORLD);
+	MPI_Send(accel_block, N_accel_block, MPI_DOUBLE,
+	         SCHEDULER_RANK, ACCEL_TAG, MPI_COMM_WORLD);
 }
 
 static void run_worker()

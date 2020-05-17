@@ -27,13 +27,15 @@ void gforce(double *pa, double *pb, double G, double *f)
 	f[2] = dz * mag;
 }
 
-/*
 void write_particles(Particle *particles, int n, const char *fname)
 {
 	FILE *file = fopen(fname, "w");
 
 	for (int i = 0; i < n; i++)
-		fprintf(file, "%lf, %lf, %lf\n", particles[i].p[0], particles[i].p[1], particles[i].p[2]); 
+	{
+		double *pos = particles[i].pos;
+		fprintf(file, "%lf, %lf, %lf\n", pos[0], pos[1], pos[2]); 
+	}
 
 	fclose(file);
 }
@@ -43,8 +45,10 @@ void read_particles(Particle *particles, int n, const char *fname)
 	FILE *file = fopen(fname, "r");
 
 	for (int i = 0; i < n; i++)
-		fscanf(file, "%lf %lf %lf", &particles[i].p[0], &particles[i].p[1], &particles[i].p[2]);
+	{
+		double *pos = particles[i].pos;
+		fscanf(file, "%lf %lf %lf", &pos[0], &pos[1], &pos[2]);
+	}
 
 	fclose(file);
 }
-*/
