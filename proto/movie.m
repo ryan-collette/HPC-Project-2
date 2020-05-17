@@ -10,8 +10,8 @@ i = 0;
 fname = 'frame0';
 
 scatter([], [])
-axis tight manual 
 set(gca, 'nextplot', 'replacechildren')
+axis tight manual 
 
 open(writer);
 

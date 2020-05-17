@@ -326,8 +326,10 @@ static void run_scheduler()
 		current[i] = false;
 
 	int step_count = (int)ceil(ps_tspan / ps_dt);
+	int total_steps = step_count;
 	int frame_stride = ps_framerate > 0 ?
 		(int)ceil(1.0 / (ps_dt * ps_framerate)) : -1;
+	int prog_stride = total_steps / 100;
 
 	//current segment
 	int seg_i = 0;
@@ -355,8 +357,11 @@ static void run_scheduler()
 				seg_i = 0;
 				step_count--;
 				
-				if (step_count % 10 == 0)
-					printf("Steps remaining: %d\n", step_count);
+				if (step_count % prog_stride == 0)
+				{
+					double prog = 1.0 - (double)step_count / total_steps;
+					printf("Progress: %.1lf%%\n", prog * 100);
+				}
 
 				if (frame_stride > 0 && step_count % frame_stride == 0)
 					print_frame();
