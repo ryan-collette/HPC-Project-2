@@ -11,6 +11,7 @@ double ps_G = 1.0;
 double ps_tspan = 1.0;
 double ps_dt = 0.001;
 double ps_framerate = 0;
+int ps_blocks_per_proc = 1;
 
 typedef struct job
 {
@@ -21,7 +22,6 @@ typedef struct job
 static const Job NULL_JOB = { -1, MPI_REQUEST_NULL };
 
 static const int SCHEDULER_RANK = 0;
-static const int BLOCKS_PER_PROC = 1;
 static const int ROW_TAG = 200;
 static const int COL_TAG = 201;
 static const int ACCEL_TAG = 300; 
@@ -71,6 +71,11 @@ size_t ps_N_particles()
 	return N_particles;
 }
 
+int ps_N_procs()
+{
+	return N_procs;
+}
+
 bool ps_is_scheduler()
 {
 	return rank == SCHEDULER_RANK;
@@ -94,7 +99,7 @@ void ps_init(size_t p_count)
 	//would definitely not have this quirk in a real piece of software
 	assert(N_procs > 1);
 
-	N_segs = N_procs * BLOCKS_PER_PROC; 
+	N_segs = N_procs * ps_blocks_per_proc; 
 
 	p_count += p_count % N_segs;	
 	parts_per_seg = p_count / N_segs;

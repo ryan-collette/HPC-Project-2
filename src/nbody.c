@@ -21,6 +21,7 @@ static void print_help()
 	printf("-framerate:\n");
 	printf("--outputs each frame as a .csv file at the given rate\n");
 	printf("--outputs nothing for framerate <= 0.0\n");
+	printf("blocks per proc:\n");
 }
 
 static void print_params()
@@ -30,7 +31,10 @@ static void print_params()
 	printf("tspan = %lf\n", ps_tspan);
 	printf("dt = %lf\n", ps_dt);
 	printf("G = %lf\n", ps_G);
-	printf("framerate  = %lf\n\n", ps_framerate);
+	printf("framerate  = %lf\n", ps_framerate);
+	printf("N_procs: %d\n", ps_N_procs());
+	printf("blocks per proc: %d\n", ps_blocks_per_proc);
+	printf("\n");
 }
 
 int main(int argc, char **argv)
@@ -58,6 +62,8 @@ int main(int argc, char **argv)
 		ps_G = atof(argv[4]);
 	if (argc > 5)
 		ps_framerate = atof(argv[5]);	
+	if (argc > 6)
+		ps_blocks_per_proc = atoi(argv[6]);
 
 	if (ps_is_scheduler())
 	{
